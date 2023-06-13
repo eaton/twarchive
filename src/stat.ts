@@ -45,7 +45,6 @@ export async function zipStats(zipfile = 'twitter.zip') {
         date: parent.created_at,
         tweets: [parent, ...children]
       };
-      console.log(`${parent.created_at} - ${data.threads[parent.id_str].tweets.length} tweet thread`);
     }
   }
 }

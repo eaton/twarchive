@@ -1,7 +1,7 @@
 {
   "name": "twarchive",
   "version": "1.0.0",
-  "description": "Tools to convert a Twitter Archive into personally-hostable data",
+  "description": "Tools to migrate Twitter, Pinboard, and other social data into a shared graph database",
   "type": "module",
   "main": "index.js",
   "engines": {
@@ -14,21 +14,26 @@
     "compile": "tsc -p ./tsconfig.build.json",
     "lint": "eslint . --ext .ts",
     "format": "prettier --config .prettierrc 'src/**/*.ts' --write",
-    "lint-and-fix": "eslint . --ext .ts --fix",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "lint-and-fix": "eslint . --ext .ts --fix"
   },
-  "author": "",
+  "author": "Jeff Eaton",
   "license": "MIT",
   "dependencies": {
+    "arangojs": "^8.3.0",
+    "flickr-sdk": "^6.2.1",
+    "node-glob": "^1.2.0",
+    "node-pinboard": "^2.0.1",
+    "playwright": "^1.35.0",
+    "ts-dotenv": "^0.9.1",
+    "twitter-archive-reader": "^7.2.0"
+  },
+  "devDependencies": {
     "@types/node": "^20.2.5",
-    "@types/sqlite3": "^3.1.8",
     "@typescript-eslint/eslint-plugin": "^5.59.9",
     "@typescript-eslint/parser": "^5.59.9",
     "eslint": "^8.42.0",
     "prettier": "^2.8.8",
-    "sqlite3": "^5.1.6",
     "ts-node": "^10.9.1",
-    "twitter-archive-reader": "^7.2.0",
     "typescript": "^5.1.3"
   }
 }
