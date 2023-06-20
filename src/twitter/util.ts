@@ -1,6 +1,5 @@
 import { PartialTweet, TwitterArchive } from "twitter-archive-reader";
 import { Tweet } from "./tweet.js";
-import { Thread } from "./thread.js";
 
 export function getTweetUrl(tweet: PartialTweet) {
   let id = '';
@@ -23,27 +22,6 @@ export async function loadTwitterArchive(path = 'twitter.zip') {
       archive.releaseZip();
       return archive;
     });
-}
-
-export function groupThreads(archive: TwitterArchive) {
-  const roots: Record<string, Thread> = {};
-  for (const t of archive.tweets.sortedIterator('asc')) {
-    if (roots[t.id_str]) continue;
-    const parent = _findRoot(t, archive);
-    if (roots[parent.id_str] === undefined) {
-      roots[parent.id_str] = new Thread(parent);
-    }
-    if (t.id_str !== parent.id_str) roots[parent.id_str].add(t);
-  }
-  return Object.values(roots);
-}
-
-function _findRoot(tweet: PartialTweet, archive: TwitterArchive) {
-  if (tweet.in_reply_to_status_id_str) {
-    const parent = archive.tweets.single(tweet.in_reply_to_status_id_str) ?? undefined;
-    if (parent) return _findRoot(parent, archive);
-  }
-  return tweet;
 }
 
 type TwitterOembedResponse = Record<string, unknown> & {

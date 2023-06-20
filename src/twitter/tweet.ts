@@ -14,8 +14,8 @@ export type TweetEntity = TweetHashtag | TweetUserMention | TweetUrl | TweetMedi
  * - ignore: leave the item as is
  * - strip:  remove the item from the tweet text
  * - expand: replace the item with its expanded text (name, full URL, etc)
- * - link:   replace the shortened URL with an HTML or markdown link
- * - embed:  replace the shortened URL with HTML or markdown embed code, if possible
+ * - link:   replace the item with an HTML or markdown link (also expands urls)
+ * - embed:  replace the item with HTML or markdown embed code, if possible (also expands urls)
  */
 export type TweetEmbedFormatOption = 'ignore' | 'strip' | 'expand' | 'link' | 'embed';
 
@@ -30,7 +30,21 @@ export interface TweetFormattingOptions {
 }
 
 export class Tweet {
-  protected userAccount?: TwitterAccount;
+  protected _user?: TwitterAccount;
+  protected _replies: Tweet[] = [];
+  protected _thread?: Thread;
+
+  static buildThreads(archive: TwitterArchive) {
+    const tweets: Record<string, Tweet> = {};
+    for (const pt of archive.tweets.sortedIterator('asc')) {
+      const tweet = new Tweet(pt, archive);
+      tweets[tweet.id] = tweet;
+      if (tweet.inReplyTo.id && tweets[tweet.inReplyTo.id]) {
+        tweets[tweet.inReplyTo.id].addReply(tweet);
+      }
+    }
+    return Object.values(tweets);
+  }
 
   constructor(protected tweet: PartialTweet, protected archive?: TwitterArchive) { }
 
@@ -38,7 +52,7 @@ export class Tweet {
     return this.tweet.id_str;
   }
 
-  get canonical() {
+  get url() {
     return getTweetUrl(this.tweet);
   }
 
@@ -46,20 +60,52 @@ export class Tweet {
     return TwitterHelpers.dateFromTweet(this.tweet);
   }
 
+  /*
+   * Thread checks and handling
+   */
+  get isThread() {
+    return this._replies.length > 0;
+  }
+
+  get thread() {
+    if (this.isThread) {
+      if (this._thread === undefined) {
+        this._thread = new Thread([this as Tweet, ...this.getReplies(true)]);
+      }
+    }
+    return this._thread;
+  }
+
+  getReplies(getDescendents = true) {
+    const replies: Tweet[] = [];
+    for (const t of this._replies) {
+      replies.push(t);
+      if (getDescendents) replies.push(...t.getReplies(getDescendents));
+    }
+    return replies;
+  }
+
+  addReply(tweet: Tweet | PartialTweet) {
+    if (tweet instanceof Tweet) {
+      this._replies.push(tweet);
+    } else {
+      this._replies.push(new Tweet(tweet));
+    }
+  }
+
+  /*
+   * Reply handling and inferred metadata
+   */
   get isReply() {
     return !!this.tweet.in_reply_to_status_id_str;
   }
 
   get isSelfReply() {
-    return this.tweet.in_reply_to_user_id_str === this.tweet.id_str;
+    return this.tweet.in_reply_to_user_id_str === this.tweet.user.id_str;
   }
 
-  get hasMedia() {
-    return TwitterHelpers.isWithMedia(this.tweet);
-  }
-
-  get hasVideo() {
-    return TwitterHelpers.isWithVideo(this.tweet);
+  get isOtherReply() {
+    return (this.isReply && !this.isSelfReply);
   }
 
   get inReplyTo() {
@@ -70,18 +116,30 @@ export class Tweet {
         user_id: this.tweet.in_reply_to_user_id_str
       }
     } else {
-      return undefined;
+      return {};
     }
   }
 
+  get isRetweet() {
+    return (this.tweet.retweeted_status || this.tweet.text.startsWith("RT @"));
+  }
+
+  get hasMedia() {
+    return TwitterHelpers.isWithMedia(this.tweet);
+  }
+
+  get hasVideo() {
+    return TwitterHelpers.isWithVideo(this.tweet);
+  }
+
   get user() {
-    if (this.userAccount === undefined) {
-      this.userAccount = new TwitterAccount(this.tweet.user);
-      if (this.archive && this.userAccount.id === this.archive.user.id) {
+    if (this._user === undefined) {
+      this._user = new TwitterAccount(this.tweet.user);
+      if (this.archive && this._user.id === this.archive.user.id) {
         
       }
     }
-    return this.userAccount;
+    return this._user;
   }
 
   get handle() {
@@ -146,10 +204,9 @@ export class Tweet {
       ...options
     };
 
-
     const extras: string[] = [];
     let mainText = this.tweet.full_text ?? '';
-    
+
     for (const lookup of Object.entries(this.links)) {
       mainText = mainText.replaceAll(lookup[0], lookup[1]);
     }
@@ -165,3 +222,50 @@ export class Tweet {
   }
 }
 
+export class Thread {
+  constructor(public readonly tweets: Tweet[]) {}
+
+  get length() {
+    return this.tweets.length;
+  }
+
+  get start() {
+    return this.tweets[0].date;
+  }
+
+  get end() {
+    return new Date(this.tweets.map(t => t.date.valueOf())[0]);
+  }
+
+  get retweets() {
+    return this.tweets
+      .map(t => t.retweets)
+      .reduce((p, c) => p + c, 0);
+  }
+
+  get favorites() {
+    return this.tweets
+      .map(t => t.favorites)
+      .reduce((p, c) => p + c, 0);
+  }
+
+  get hashtags() {
+    return [...new Set<string>(this.tweets.flatMap(t => t.hashtags))];
+  }
+
+  get links() {
+    return this.tweets[0].links;
+  }
+
+  get mentions() {
+    return this.tweets[0].mentions;
+  }
+
+  get media() {
+    return this.tweets[0].media;
+  }
+
+  format() {    
+    return [...this.tweets.map(tweet => tweet.format())].join('\n\n');
+  }
+}

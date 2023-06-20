@@ -13,7 +13,8 @@ export async function unwrapUrl(url: string, forceHttps = true) {
 
   return got(reqUrl, { 
     throwHttpErrors: false,
-    followRedirect: true
+    followRedirect: true,
+    method: 'HEAD'
   }).then(resp => {
     results.final = resp.url.toString();
     results.message = resp.statusMessage;

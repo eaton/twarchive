@@ -1,5 +1,5 @@
 import TwitterArchive from 'twitter-archive-reader';
-import { groupThreads, loadTwitterArchive } from './twitter/util.js';
+import { loadTwitterArchive } from './twitter/util.js';
 import { Favorite } from './twitter/favorite.js';
 import * as csv from 'fast-csv';
 
@@ -7,6 +7,7 @@ import matter from 'gray-matter';
 const { stringify: formatFrontMatter } = matter;
 
 import fse from 'fs-extra';
+import { Tweet } from './twitter/tweet.js';
 const { ensureDir, createWriteStream, writeFile } = fse;
 
 await outputFullArchive();
@@ -25,41 +26,59 @@ export async function outputFollowing(archive: TwitterArchive) {
   return Promise.resolve();
 }
 
-export async function outputTweets(archive: TwitterArchive) {
-  const roots = groupThreads(archive);
+interface OutputTweetOptions {
+  filter?: (tweet: Tweet) => boolean;
+  singles?: boolean;
+  threads?: boolean;
+  replies?: boolean;
+  retweets?: boolean;
+  format?: 'markdown' | 'html' | 'json';
+}
+
+export async function outputTweets(archive: TwitterArchive, options: OutputTweetOptions = {}) {
+  const threaded = Tweet.buildThreads(archive);
 
   let dir = '';
-  for (const thread of roots) {
-    if (thread.isReply) {
-      // Replies get treated as replies, even if they're threads.
-      dir = 'replies'
-    } else if (thread.isSelfReply) {
-      dir = 'threads'
+  for (const tweet of threaded) {
+
+    if (tweet.isSelfReply || tweet.isRetweet) {
+      continue;
+    } else if (tweet.isOtherReply) {
+      dir = 'reply'
+    } else if (tweet.isThread) {
+      dir = 'thread'
     } else {
-      dir = 'singles'
+      dir = 'single'
     }
 
     const frontMatter: Record<string, unknown> = {
-      date: thread.date.toISOString(),
+      date: tweet.date,
       layout: `twitter_${dir}`,
-      canonical: thread.canonical,
-      tweets: thread.tweets.length,
-      favorites: thread.favorites,
-      retweets: thread.retweets,
+      canonical: tweet.url,
+      favorites: tweet.thread?.favorites ?? tweet.favorites,
+      retweets: tweet.thread?.retweets ?? tweet.retweets,
     }
 
-    if (thread.hashtags.length) frontMatter['tags'] = thread.hashtags;
-    if (thread.links.length) frontMatter['links'] = thread.links;
-    if (thread.mentions.length) frontMatter['mentions'] = thread.mentions;
+    const hashtags = tweet.thread?.hashtags ?? tweet.hashtags;
+    const links = tweet.thread?.links ?? tweet.links;
+    const mentions = tweet.thread?.mentions ?? tweet.mentions;
 
-    if (thread.isReply) {
-      frontMatter['inReplyTo'] = `https://twitter.com/twitter/status/${thread.tweets[0].inReplyTo?.id}`;
+    if (hashtags.length) frontMatter['tags'] = hashtags;
+    if (Object.entries(links).length) frontMatter['links'] = Object.values(links);
+    if (Object.entries(mentions).length) frontMatter['mentions'] = Object.keys(mentions);
+
+    if (tweet.isThread) {
+      frontMatter['tweets'] = tweet.thread?.tweets.length;
     }
 
-    await ensureDir(`output/twitter/${dir}/${thread.date.getFullYear()}`);
+    if (tweet.isReply) {
+      frontMatter['inReplyTo'] = `https://twitter.com/${tweet.inReplyTo?.handle ?? 'twitter'}/status/${tweet.inReplyTo?.id}`;
+    }
+
+    await ensureDir(`output/twitter/${dir}/${tweet.date.getFullYear()}`);
     await writeFile(
-      `output/twitter/${dir}/${thread.date.getFullYear()}/${thread.date.toISOString().split('T')[0]}.md`,
-      formatFrontMatter(thread.format(), frontMatter)
+      `output/twitter/${dir}/${tweet.date.getFullYear()}/${tweet.date.toISOString().split('T')[0]}-${tweet.id}.md`,
+      formatFrontMatter(tweet.thread?.format() ?? tweet.format(), frontMatter)
     );
   }
 }
