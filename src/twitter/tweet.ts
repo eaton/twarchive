@@ -254,11 +254,25 @@ export class Thread {
   }
 
   get links() {
-    return this.tweets[0].links;
+    let output: Record<string, string> = {};
+    for (const t of this.tweets) {
+      output = {
+        ...output,
+        ...t.links
+      }
+    }
+    return output;
   }
 
   get mentions() {
-    return this.tweets[0].mentions;
+    let output: Record<string, string> = {};
+    for (const t of this.tweets) {
+      output = {
+        ...output,
+        ...t.mentions
+      }
+    }
+    return output;
   }
 
   get media() {

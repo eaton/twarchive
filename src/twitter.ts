@@ -35,20 +35,46 @@ interface OutputTweetOptions {
   format?: 'markdown' | 'html' | 'json';
 }
 
-export async function outputTweets(archive: TwitterArchive, options: OutputTweetOptions = {}) {
+export async function outputTweets(archive: TwitterArchive, options?: OutputTweetOptions) {
   const threaded = Tweet.buildThreads(archive);
+  const opts = options ?? {
+    threads: true,
+    format: 'markdown'
+  };
 
   let dir = '';
   for (const tweet of threaded) {
 
-    if (tweet.isSelfReply || tweet.isRetweet) {
+    if (opts.filter) {
+      if (opts.filter(tweet) === false) continue;
+    }
+
+    if (tweet.isSelfReply) {
       continue;
+    } else if (tweet.isRetweet) {
+      if (opts.retweets) {
+        dir = 'retweet';
+      } else {
+        continue;
+      }
     } else if (tweet.isOtherReply) {
-      dir = 'reply'
+      if (opts.replies) {
+        dir = 'reply';
+      } else {
+        continue;
+      }
     } else if (tweet.isThread) {
-      dir = 'thread'
+      if (opts.threads) {
+        dir = 'thread'
+      } else {
+        continue;
+      }
     } else {
-      dir = 'single'
+      if (opts.singles) {
+        dir = 'single'
+      } else {
+        continue;
+      }
     }
 
     const frontMatter: Record<string, unknown> = {
