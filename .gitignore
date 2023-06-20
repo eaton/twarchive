@@ -68,3 +68,4 @@ package-lock.json
 /cache/
 /media/
 /dist/
+/output/
