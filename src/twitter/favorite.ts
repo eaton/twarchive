@@ -1,40 +1,47 @@
-import { PartialFavorite, TwitterHelpers } from "twitter-archive-reader";
+import { PartialFavorite } from "twitter-archive-reader";
 import { getOembedData } from "./util.js";
-import { unwrapUrl } from "../util.js";
+import { unwrapUrl } from "../shared/unwrap-url.js";
 
 export class Favorite {
-  tweetDate?: Date;
+  populated = false;
+  id?: string;
+  tweetDate?: string;
+  favDate?: string;
   handle?: string;
   displayName?: string;
-  expanded?: string;
+  url?: string;
+  text?: string;
+  raw?: string;
   deleted = false;
-  protected populated = false;
 
-  static async fromPartial(favorite: PartialFavorite) {
-    const fav = new Favorite(favorite);
-    return fav.populate();
+  static fromPartial(favorite: PartialFavorite) {
+    const fav = new Favorite();
+    fav.id == favorite.tweetId;
+    fav.raw = favorite.fullText;
+    fav.favDate = favorite.date?.toISOString();
+    fav.url = favorite.expandedUrl ?? undefined;
+    return fav;
   }
 
-  constructor(protected favorite: PartialFavorite) {};
+  static fromJSON(favorite: Record<string, unknown>) {
+    const fav = new Favorite();
 
-  get id() {
-    return this.favorite.tweetId;
-  }
+    fav.populated = !!favorite.populated;
+    fav.id = favorite.id as string ?? undefined;
+    fav.tweetDate = favorite.tweetDate as string ?? undefined;
+    fav.favDate = favorite.favDate as string ?? undefined;
+    fav.handle = favorite.handle as string ?? undefined;
+    fav.displayName = favorite.displayName as string ?? undefined;
+    fav.url = favorite.url as string ?? undefined;
+    fav.text = favorite.text as string ?? undefined;
+    fav.raw = favorite.raw as string ?? undefined;
+    fav.deleted = !!favorite.deleted;
 
-  get date() {
-    return TwitterHelpers.dateFromFavorite(this.favorite);
+    return fav;
   }
 
   get canonical() {
-    return (this.handle) ? `https://twitter.com/${this.handle}/status/${this.id}` : this.favorite.expandedUrl;
-  }
-
-  get raw() {
-    return this.favorite.fullText;
-  }
-
-  get text() {
-    return this.expanded ?? this.favorite.fullText;
+    return this.url ?? `https://twitter.com/${this.handle ?? 'twitter'}/status/${this.id}`;
   }
 
   get isRestricted() {
@@ -47,17 +54,16 @@ export class Favorite {
 
   async populate() {
     if (!this.populated) {
-      if (this.favorite.fullText) {
-        const odata = await getOembedData(this.favorite.tweetId);
+      if (this.raw && this.id) {
+        const odata = await getOembedData(this.id);
         if (!odata.error) {
           this.handle = odata.screen_name;
           this.displayName = odata.name;
-          this.tweetDate = odata.date;
+          this.tweetDate = odata.date.toISOString();
           this.deleted = odata.deleted;
-          this.expanded = this.favorite.fullText;
         }
 
-        const urls = /http[s]?:\/\/[0-9a-zA-Z\.-_]+\/[0-9a-zA-Z]+/.exec(this.favorite.fullText);
+        const urls = /http[s]?:\/\/[0-9a-zA-Z\.-_]+\/[0-9a-zA-Z]+/.exec(this.raw ?? '');
         if (urls) {
           const mapping: Record<string, string> = {};
           for (const match of urls) {
@@ -66,7 +72,7 @@ export class Favorite {
           }
 
           for (const [short, long] of Object.entries(mapping)) {
-            this.expanded = this.expanded?.replaceAll(short, long);
+            this.text = this.text?.replaceAll(short, long);
           }
         }
       }
@@ -74,5 +80,20 @@ export class Favorite {
     }
   
     return Promise.resolve(this);
+  }
+
+  toJSON() {
+    return {
+      id: this.id,
+      tweetDate: this.tweetDate,
+      favDate: this.favDate,
+      handle: this.handle,
+      displayName: this.displayName,
+      url: this.url,
+      raw: this.raw,
+      text: this.text,
+      deleted: this.deleted,
+      populated: this.populated
+    }
   }
 }

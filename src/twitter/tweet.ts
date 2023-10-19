@@ -1,6 +1,5 @@
 import { MediaGDPREntity, PartialTweet, PartialTweetEntity, PartialTweetMediaEntity, TwitterArchive, TwitterHelpers } from "twitter-archive-reader";
 import { TwitterAccount } from "./twitter-account.js";
-import { getTweetUrl } from "./util.js";
 
 export type TweetHashtag = PartialTweetEntity['hashtags'];
 export type TweetUserMention = PartialTweetEntity['user_mentions'];
@@ -31,6 +30,7 @@ export interface TweetFormattingOptions {
 
 export class Tweet {
   protected _user?: TwitterAccount;
+  protected _links?: Record<string, string>;
   protected _replies: Tweet[] = [];
   protected _thread?: Thread;
 
@@ -46,18 +46,18 @@ export class Tweet {
     return Object.values(tweets);
   }
 
-  constructor(protected tweet: PartialTweet, protected archive?: TwitterArchive) { }
+  constructor(protected _tweet: PartialTweet, protected archive?: TwitterArchive) { }
 
   get id() {
-    return this.tweet.id_str;
+    return this._tweet.id_str;
   }
 
   get url() {
-    return getTweetUrl(this.tweet);
+    return `https://twitter.com/${this.user.handle}/status/${this.id}`;
   }
 
   get date() {
-    return TwitterHelpers.dateFromTweet(this.tweet);
+    return TwitterHelpers.dateFromTweet(this._tweet);
   }
 
   /*
@@ -97,11 +97,11 @@ export class Tweet {
    * Reply handling and inferred metadata
    */
   get isReply() {
-    return !!this.tweet.in_reply_to_status_id_str;
+    return !!this._tweet.in_reply_to_status_id_str;
   }
 
   get isSelfReply() {
-    return this.tweet.in_reply_to_user_id_str === this.tweet.user.id_str;
+    return this._tweet.in_reply_to_user_id_str === this._tweet.user.id_str;
   }
 
   get isOtherReply() {
@@ -109,11 +109,11 @@ export class Tweet {
   }
 
   get inReplyTo() {
-    if (this.tweet.in_reply_to_status_id_str) {
+    if (this._tweet.in_reply_to_status_id_str) {
       return {
-        id: this.tweet.in_reply_to_status_id_str,
-        handle: this.tweet.in_reply_to_screen_name,
-        user_id: this.tweet.in_reply_to_user_id_str
+        id: this._tweet.in_reply_to_status_id_str,
+        handle: this._tweet.in_reply_to_screen_name,
+        user_id: this._tweet.in_reply_to_user_id_str
       }
     } else {
       return {};
@@ -121,20 +121,20 @@ export class Tweet {
   }
 
   get isRetweet() {
-    return (this.tweet.retweeted_status || this.tweet.text.startsWith("RT @"));
+    return (this._tweet.retweeted_status || this._tweet.text.startsWith("RT @"));
   }
 
   get hasMedia() {
-    return TwitterHelpers.isWithMedia(this.tweet);
+    return TwitterHelpers.isWithMedia(this._tweet);
   }
 
   get hasVideo() {
-    return TwitterHelpers.isWithVideo(this.tweet);
+    return TwitterHelpers.isWithVideo(this._tweet);
   }
 
   get user() {
     if (this._user === undefined) {
-      this._user = new TwitterAccount(this.tweet.user);
+      this._user = new TwitterAccount(this._tweet.user);
       if (this.archive && this._user.id === this.archive.user.id) {
         
       }
@@ -147,28 +147,30 @@ export class Tweet {
   }
 
   get raw() {
-    return this.tweet.full_text ?? '';
+    return this._tweet.full_text ?? '';
   }
 
   get hashtags() {
     const tags = new Set<string>();
-    for (const item of this.tweet.entities.hashtags) {
+    for (const item of this._tweet.entities.hashtags) {
       tags.add(item.text);
     }
     return [...tags.values()];
   }
 
   get links() {
-    const links: Record<string, string> = {};
-    for (const item of this.tweet.entities.urls) {
-      links[item.url] = item.expanded_url;
+    if (this._links === undefined) {
+      this._links = {};
+      for (const item of this._tweet.entities.urls) {
+        this._links[item.url] = item.expanded_url;
+      }  
     }
-    return links;
+    return this._links;
   }
 
   get mentions() {
     const mentions: Record<string, string> = {};
-    for (const item of this.tweet.entities.user_mentions) {
+    for (const item of this._tweet.entities.user_mentions) {
       mentions[item.screen_name] = item.name;
     }
     return mentions;
@@ -176,22 +178,22 @@ export class Tweet {
 
   get media() {
     const result: Record<string, MediaGDPREntity> = {};
-    for (const item of this.tweet.extended_entities?.media ?? []) {
+    for (const item of this._tweet.extended_entities?.media ?? []) {
       result[item.url] = item;
     }
     return result;
   }
 
   get retweets() {
-    return this.tweet.retweet_count ?? 0;
+    return this._tweet.retweet_count ?? 0;
   }
 
   get favorites() {
-    return this.tweet.favorite_count ?? 0;
+    return this._tweet.favorite_count ?? 0;
   }
 
   get favorited() {
-    return this.tweet.favorited ?? false;
+    return this._tweet.favorited ?? false;
   }
 
   format(options: TweetFormattingOptions = {}) {
@@ -205,7 +207,7 @@ export class Tweet {
     };
 
     const extras: string[] = [];
-    let mainText = this.tweet.full_text ?? '';
+    let mainText = this._tweet.full_text ?? '';
 
     for (const lookup of Object.entries(this.links)) {
       mainText = mainText.replaceAll(lookup[0], lookup[1]);
@@ -275,11 +277,7 @@ export class Thread {
     return output;
   }
 
-  get media() {
-    return this.tweets[0].media;
-  }
-
-  format() {    
+  format() {
     return [...this.tweets.map(tweet => tweet.format())].join('\n\n');
   }
 }

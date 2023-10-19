@@ -1,21 +1,35 @@
-import TwitterArchive from 'twitter-archive-reader';
+import TwitterArchive, { MediaGDPREntity } from 'twitter-archive-reader';
 import { loadTwitterArchive } from './twitter/util.js';
-import { Favorite } from './twitter/favorite.js';
-import * as csv from 'fast-csv';
 
 import matter from 'gray-matter';
 const { stringify: formatFrontMatter } = matter;
 
 import fse from 'fs-extra';
-import { Tweet } from './twitter/tweet.js';
-const { ensureDir, createWriteStream, writeFile } = fse;
+import { Thread, Tweet } from './twitter/tweet.js';
+import path from 'path';
+import { findTopics } from './shared/extract.js';
+const { ensureDir, writeFile } = fse;
 
 await outputFullArchive();
 
-export async function outputFullArchive(zipfile = 'twitter.zip') {
+export async function outputFullArchive(zipfile = 'input/twitter.zip') {
   const archive = await loadTwitterArchive(zipfile);
   // await outputFavorites(archive);
-  await outputTweets(archive);
+  await outputTweets(archive, {
+    filter: tweet => {
+      if (tweet.isRetweet) return false;
+      if (tweet.isReply)return false;
+      if (tweet.thread) {
+        return (
+          tweet.thread.tweets.length > 2 ||
+          tweet.thread.favorites > 200 ||
+          tweet.thread.retweets > 50
+        );
+      } else {
+        return (tweet.favorites > 100 || tweet.retweets > 25);
+      }
+    }
+  });
 }
 
 export async function outputFollowers(archive: TwitterArchive) {
@@ -28,18 +42,14 @@ export async function outputFollowing(archive: TwitterArchive) {
 
 interface OutputTweetOptions {
   filter?: (tweet: Tweet) => boolean;
-  singles?: boolean;
-  threads?: boolean;
-  replies?: boolean;
-  retweets?: boolean;
   format?: 'markdown' | 'html' | 'json';
 }
 
 export async function outputTweets(archive: TwitterArchive, options?: OutputTweetOptions) {
   const threaded = Tweet.buildThreads(archive);
-  const opts = options ?? {
-    threads: true,
-    format: 'markdown'
+  const opts = {
+    format: 'markdown',
+    ...options
   };
 
   let dir = '';
@@ -52,35 +62,28 @@ export async function outputTweets(archive: TwitterArchive, options?: OutputTwee
     if (tweet.isSelfReply) {
       continue;
     } else if (tweet.isRetweet) {
-      if (opts.retweets) {
-        dir = 'retweet';
-      } else {
-        continue;
-      }
+      dir = 'retweet';
     } else if (tweet.isOtherReply) {
-      if (opts.replies) {
-        dir = 'reply';
-      } else {
-        continue;
-      }
+      dir = 'reply';
     } else if (tweet.isThread) {
-      if (opts.threads) {
-        dir = 'thread'
-      } else {
-        continue;
+      dir = 'thread'
+    } else {
+      dir = 'single'
+    }
+
+    if (tweet.isThread) {
+      for (const t of tweet.thread?.tweets ?? []) {
+        await saveMediaFiles(t, archive);
       }
     } else {
-      if (opts.singles) {
-        dir = 'single'
-      } else {
-        continue;
-      }
+      await saveMediaFiles(tweet, archive);
     }
 
     const frontMatter: Record<string, unknown> = {
       date: tweet.date,
-      layout: `twitter_${dir}`,
-      canonical: tweet.url,
+      id: tweet.id,
+      layout: `tweet.njk`,
+      source: tweet.url,
       favorites: tweet.thread?.favorites ?? tweet.favorites,
       retweets: tweet.thread?.retweets ?? tweet.retweets,
     }
@@ -101,6 +104,8 @@ export async function outputTweets(archive: TwitterArchive, options?: OutputTwee
       frontMatter['inReplyTo'] = `https://twitter.com/${tweet.inReplyTo?.handle ?? 'twitter'}/status/${tweet.inReplyTo?.id}`;
     }
 
+    findTopics(tweet.raw);
+
     await ensureDir(`output/twitter/${dir}/${tweet.date.getFullYear()}`);
     await writeFile(
       `output/twitter/${dir}/${tweet.date.getFullYear()}/${tweet.date.toISOString().split('T')[0]}-${tweet.id}.md`,
@@ -109,35 +114,51 @@ export async function outputTweets(archive: TwitterArchive, options?: OutputTwee
   }
 }
 
-export async function outputFavorites(archive: TwitterArchive, includeRestricted = false) {
-  await ensureDir(`output/twitter`);
+export function getMediaFilename(entity: MediaGDPREntity) {
+  let filename = `${entity.id_str}-${entity.media_url_https.split('/').pop()}`;
+  if (entity.type !== 'photo') {
+    filename = [...filename.split('.').slice(0, -1), 'mp4'].join('.');
+  }
+  return filename;
+}
 
-  const stream = csv.format({
-    objectMode: true,
-    headers: true,
-    quote: false,
-    quoteHeaders: false,
-    delimiter: '\t',
-  });
-  stream.pipe(createWriteStream(`output/twitter/favorites.tsv`));
+export async function saveMediaFiles(tweet: Tweet, archive: TwitterArchive, dir = 'output/twitter/media') {
+  await ensureDir(dir);
+  for (const media of Object.values(tweet.media)) {
+    await archive.medias.fromTweetMediaEntity(media, true)
+      .then(ab => writeFile(
+        path.join(dir, getMediaFilename(media)),
+        Buffer.from(ab as ArrayBuffer))
+      );
+    }
+}
 
-  console.log(`Processing ${archive.favorites.length} favorites`);
+export async function screenshotTweet(url: string, dir = 'output/twitter/screenshots' ) {
+  // do nothing
+}
 
-  for (const f of archive.favorites) {
-    const fav = new Favorite(f);
-    if (fav.deleted || fav.isSuspended) continue;
-    if (fav.isRestricted && includeRestricted === false) continue;
+export function formatTweet(tweet: Tweet): string[] {
+  const output: string[] = [];
+  let mainText = tweet.raw ?? '';
 
-    await fav.populate();
-    stream.write({
-      id: fav.id,
-      created: fav.tweetDate?.toISOString().split('T')[0],
-      faved: fav.date?.toISOString().split('T')[0],
-      user: fav.handle,
-      text: fav.text?.replaceAll('\n', '\\n')
-    });
+  for (const lookup of Object.entries(tweet.links)) {
+    mainText = mainText.replaceAll(lookup[0], lookup[1]);
   }
 
-  stream.end();
-  return Promise.resolve();
+  // Link media link the media files
+  for (const [key, media] of Object.entries(tweet.media)) {
+    mainText = mainText.replaceAll(key, '');
+    output.push(media.media_url_https);
+    if (media.media_alt) output.push(media.media_alt)
+  }
+
+  return output;
+}
+
+export function formatThread(thread: Thread) {
+  
+}
+
+export function makeAttrSafe(text: string) {
+  return text.replaceAll("\n", "&#13;");
 }

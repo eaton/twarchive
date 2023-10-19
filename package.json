@@ -21,7 +21,7 @@
   "license": "MIT",
   "dependencies": {
     "@autogram/url-tools": "^2.5.4",
-    "@types/got": "^9.6.12",
+    "@salesforce/ts-types": "^2.0.3",
     "@types/natural": "^5.1.2",
     "arangojs": "^8.3.0",
     "fast-csv": "^4.3.6",
@@ -43,6 +43,7 @@
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.1",
+    "@types/got": "^9.6.12",
     "@types/luxon": "^3.3.0",
     "@types/node": "^20.2.5",
     "@types/slug": "^5.0.3",
